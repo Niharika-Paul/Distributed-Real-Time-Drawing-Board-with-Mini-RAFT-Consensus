@@ -1,0 +1,139 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────
+#  Mini-RAFT Distributed Drawing Board
+#  Services:
+#    frontend  – nginx serving index.html          :80
+#    gateway   – WebSocket + commit broadcaster    :8000
+#    replica1  – RAFT node 1                       :8001
+#    replica2  – RAFT node 2                       :8002
+#    replica3  – RAFT node 3                       :8003
+# ─────────────────────────────────────────────────────────
+
+networks:
+  raft-net:
+    driver: bridge
+
+x-replica-env: &replica-env
+  REPLICA1_URL: http://replica1:8001
+  REPLICA2_URL: http://replica2:8002
+  REPLICA3_URL: http://replica3:8003
+  GATEWAY_URL:  http://gateway:8000
+
+services:
+
+  # ── Frontend ──────────────────────────────────────────
+  frontend:
+    build: ./frontend
+    ports:
+      - "80:80"
+    networks:
+      - raft-net
+    depends_on:
+      gateway:
+        condition: service_healthy
+
+  # ── Gateway ───────────────────────────────────────────
+  gateway:
+    build: ./gateway
+    ports:
+      - "8000:8000"
+    environment:
+      PORT: 8000
+      <<: *replica-env
+    networks:
+      - raft-net
+    depends_on:
+      replica1:
+        condition: service_healthy
+      replica2:
+        condition: service_healthy
+      replica3:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    volumes:
+      - ./gateway:/app          # hot-reload bind mount
+
+  # ── Replica 1 ─────────────────────────────────────────
+  replica1:
+    build: ./replica1
+    container_name: replica1
+    hostname: replica1
+    ports:
+      - "8001:8001"
+    environment:
+      REPLICA_ID: replica1
+      PORT: 8001
+      <<: *replica-env
+    networks:
+      raft-net:
+        aliases:
+          - replica1
+    volumes:
+      - ./replica1:/app         # bind-mount for hot-reload
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8001/status')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # ── Replica 2 ─────────────────────────────────────────
+  replica2:
+    build: ./replica2
+    container_name: replica2
+    hostname: replica2
+    ports:
+      - "8002:8002"
+    environment:
+      REPLICA_ID: replica2
+      PORT: 8002
+      <<: *replica-env
+    networks:
+      raft-net:
+        aliases:
+          - replica2
+    volumes:
+      - ./replica2:/app
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8002/status')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # ── Replica 3 ─────────────────────────────────────────
+  replica3:
+    build: ./replica3
+    container_name: replica3
+    hostname: replica3
+    ports:
+      - "8003:8003"
+    environment:
+      REPLICA_ID: replica3
+      PORT: 8003
+      <<: *replica-env
+    networks:
+      raft-net:
+        aliases:
+          - replica3
+    volumes:
+      - ./replica3:/app
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8003/status')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped

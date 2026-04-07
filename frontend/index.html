@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DistDraw · Mini-RAFT Board</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600&family=Syne:wght@400;700;800&display=swap');
+
+  :root {
+    --bg:        #0a0a0f;
+    --surface:   #111118;
+    --border:    #1e1e2e;
+    --accent:    #7c3aed;
+    --accent2:   #06d6a0;
+    --warn:      #f59e0b;
+    --danger:    #ef4444;
+    --text:      #e2e8f0;
+    --muted:     #475569;
+    --leader-c:  #06d6a0;
+    --follower-c:#7c3aed;
+    --cand-c:    #f59e0b;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    height: 100vh;
+    display: grid;
+    grid-template-rows: 56px 1fr 36px;
+    overflow: hidden;
+  }
+
+  /* ── Top bar ── */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 0 20px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    position: relative;
+  }
+
+  .logo {
+    font-size: 1.1rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    color: var(--text);
+  }
+  .logo span { color: var(--accent2); }
+
+  .divider { width: 1px; height: 28px; background: var(--border); }
+
+  /* Tool strip */
+  .tools { display: flex; gap: 6px; align-items: center; }
+
+  .tool-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 0.75rem;
+    font-family: 'JetBrains Mono', monospace;
+    padding: 5px 10px;
+    transition: all 0.15s;
+  }
+  .tool-btn:hover, .tool-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .tool-btn.danger:hover { background: var(--danger); border-color: var(--danger); }
+
+  /* Color swatches */
+  .swatches { display: flex; gap: 5px; align-items: center; }
+  .swatch {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: transform 0.15s, border-color 0.15s;
+  }
+  .swatch.active, .swatch:hover { transform: scale(1.2); border-color: #fff6; }
+
+  /* Brush size */
+  .size-row { display: flex; align-items: center; gap: 8px; }
+  .size-row label { font-size: 0.7rem; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+  input[type=range] {
+    -webkit-appearance: none;
+    width: 80px; height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  /* Status cluster (right side of header) */
+  .status-cluster {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .ws-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.68rem;
+    padding: 3px 9px;
+    border-radius: 99px;
+    border: 1px solid;
+    letter-spacing: 0.04em;
+  }
+  .ws-badge.connected { border-color: var(--accent2); color: var(--accent2); }
+  .ws-badge.disconnected { border-color: var(--danger); color: var(--danger); }
+  .ws-badge.connecting { border-color: var(--warn); color: var(--warn); }
+
+  /* ── Main area ── */
+  main {
+    display: grid;
+    grid-template-columns: 1fr 220px;
+    overflow: hidden;
+  }
+
+  /* Canvas pane */
+  #canvas-wrap {
+    position: relative;
+    overflow: hidden;
+    background:
+      linear-gradient(var(--border) 1px, transparent 1px),
+      linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 32px 32px;
+    background-color: var(--bg);
+  }
+
+  #board {
+    position: absolute;
+    top: 0; left: 0;
+    cursor: crosshair;
+    touch-action: none;
+  }
+
+  /* Eraser cursor */
+  body.eraser #board { cursor: cell; }
+
+  /* ── Sidebar ── */
+  aside {
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .aside-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.62rem;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    text-transform: uppercase;
+    padding: 10px 14px 6px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* Replica cards */
+  .replicas { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+
+  .replica-card {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    transition: border-color 0.3s;
+  }
+  .replica-card.leader   { border-color: var(--leader-c); }
+  .replica-card.follower { border-color: var(--border); }
+  .replica-card.candidate{ border-color: var(--cand-c); }
+
+  .rc-top { display: flex; justify-content: space-between; align-items: center; }
+  .rc-name {
+    font-weight: 700;
+    font-size: 0.82rem;
+  }
+  .role-pill {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.6rem;
+    padding: 2px 7px;
+    border-radius: 99px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .role-pill.leader   { background: #06d6a015; color: var(--leader-c); border: 1px solid var(--leader-c); }
+  .role-pill.follower { background: #7c3aed15; color: var(--follower-c); border: 1px solid #7c3aed44; }
+  .role-pill.candidate{ background: #f59e0b15; color: var(--cand-c); border: 1px solid var(--cand-c); }
+  .role-pill.unknown  { background: #ffffff08; color: var(--muted); border: 1px solid var(--border); }
+
+  .rc-meta {
+    margin-top: 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.6rem;
+    color: var(--muted);
+    display: flex;
+    gap: 10px;
+  }
+
+  /* Activity log */
+  .log-section { flex: 1; display: flex; flex-direction: column; overflow: hidden; border-top: 1px solid var(--border); }
+  #activity-log {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  #activity-log::-webkit-scrollbar { width: 4px; }
+  #activity-log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .log-entry {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.58rem;
+    color: var(--muted);
+    line-height: 1.5;
+    border-left: 2px solid var(--border);
+    padding-left: 6px;
+  }
+  .log-entry.election { border-color: var(--cand-c); color: var(--cand-c); }
+  .log-entry.commit   { border-color: var(--leader-c); color: var(--accent2); }
+  .log-entry.error    { border-color: var(--danger); color: var(--danger); }
+  .log-entry.info     { border-color: var(--accent); color: #a78bfa; }
+
+  /* ── Status bar ── */
+  footer {
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 0 16px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.62rem;
+    color: var(--muted);
+  }
+  footer span { display: flex; align-items: center; gap: 5px; }
+  .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--muted);
+    display: inline-block;
+  }
+  .dot.green  { background: var(--accent2); box-shadow: 0 0 6px var(--accent2); }
+  .dot.amber  { background: var(--warn); }
+  .dot.red    { background: var(--danger); }
+
+  /* Pulse animation on leader card */
+  @keyframes pulse-border {
+    0%,100% { box-shadow: 0 0 0 0 #06d6a033; }
+    50%      { box-shadow: 0 0 0 4px #06d6a011; }
+  }
+  .replica-card.leader { animation: pulse-border 2s ease infinite; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Dist<span>Draw</span></div>
+  <div class="divider"></div>
+
+  <div class="tools">
+    <button class="tool-btn active" id="btn-pen"    onclick="setTool('pen')">✏ pen</button>
+    <button class="tool-btn"        id="btn-eraser" onclick="setTool('eraser')">⌫ erase</button>
+    <button class="tool-btn danger" onclick="clearBoard()">✕ clear</button>
+  </div>
+
+  <div class="divider"></div>
+  <div class="swatches" id="swatches"></div>
+
+  <div class="divider"></div>
+  <div class="size-row">
+    <label>SIZE</label>
+    <input type="range" id="brush-size" min="1" max="30" value="4">
+    <label id="size-label" style="min-width:20px">4</label>
+  </div>
+
+  <div class="status-cluster">
+    <div class="ws-badge connecting" id="ws-badge">CONNECTING</div>
+  </div>
+</header>
+
+<main>
+  <div id="canvas-wrap">
+    <canvas id="board"></canvas>
+  </div>
+
+  <aside>
+    <div class="aside-title">Cluster Status</div>
+    <div class="replicas" id="replicas">
+      <div class="replica-card" id="card-replica1">
+        <div class="rc-top">
+          <span class="rc-name">replica1</span>
+          <span class="role-pill unknown" id="role-replica1">–</span>
+        </div>
+        <div class="rc-meta">
+          <span id="term-replica1">term –</span>
+          <span id="log-replica1">log –</span>
+        </div>
+      </div>
+      <div class="replica-card" id="card-replica2">
+        <div class="rc-top">
+          <span class="rc-name">replica2</span>
+          <span class="role-pill unknown" id="role-replica2">–</span>
+        </div>
+        <div class="rc-meta">
+          <span id="term-replica2">term –</span>
+          <span id="log-replica2">log –</span>
+        </div>
+      </div>
+      <div class="replica-card" id="card-replica3">
+        <div class="rc-top">
+          <span class="rc-name">replica3</span>
+          <span class="role-pill unknown" id="role-replica3">–</span>
+        </div>
+        <div class="rc-meta">
+          <span id="term-replica3">term –</span>
+          <span id="log-replica3">log –</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="log-section">
+      <div class="aside-title">Activity</div>
+      <div id="activity-log"></div>
+    </div>
+  </aside>
+</main>
+
+<footer>
+  <span><span class="dot" id="conn-dot"></span><span id="conn-text">Disconnected</span></span>
+  <span>strokes: <b id="stroke-count">0</b></span>
+  <span>leader: <b id="leader-display">–</b></span>
+</footer>
+
+<script>
+// ── Palette ──────────────────────────────────────────────────────────────────
+const COLORS = [
+  '#e2e8f0','#ef4444','#f97316','#f59e0b',
+  '#22c55e','#06d6a0','#38bdf8','#818cf8',
+  '#c084fc','#f472b6',
+];
+let currentColor = COLORS[0];
+let currentTool  = 'pen';
+let brushSize    = 4;
+let strokeCount  = 0;
+
+const swatchContainer = document.getElementById('swatches');
+COLORS.forEach((c, i) => {
+  const s = document.createElement('div');
+  s.className = 'swatch' + (i === 0 ? ' active' : '');
+  s.style.background = c;
+  s.title = c;
+  s.onclick = () => {
+    document.querySelectorAll('.swatch').forEach(x => x.classList.remove('active'));
+    s.classList.add('active');
+    currentColor = c;
+  };
+  swatchContainer.appendChild(s);
+});
+
+const sizeSlider = document.getElementById('brush-size');
+const sizeLabel  = document.getElementById('size-label');
+sizeSlider.oninput = () => {
+  brushSize = +sizeSlider.value;
+  sizeLabel.textContent = brushSize;
+};
+
+function setTool(t) {
+  currentTool = t;
+  document.getElementById('btn-pen').classList.toggle('active', t === 'pen');
+  document.getElementById('btn-eraser').classList.toggle('active', t === 'eraser');
+  document.body.classList.toggle('eraser', t === 'eraser');
+}
+
+// ── Canvas Setup ──────────────────────────────────────────────────────────────
+const wrap   = document.getElementById('canvas-wrap');
+const canvas = document.getElementById('board');
+const ctx    = canvas.getContext('2d');
+
+function resize() {
+  const { width, height } = wrap.getBoundingClientRect();
+  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  canvas.width  = width;
+  canvas.height = height;
+  ctx.putImageData(imgData, 0, 0);
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ── Drawing State ─────────────────────────────────────────────────────────────
+let drawing   = false;
+let lastPoint = null;
+let currentStrokePts = [];
+
+function getPos(e) {
+  const r = canvas.getBoundingClientRect();
+  const src = e.touches ? e.touches[0] : e;
+  return { x: src.clientX - r.left, y: src.clientY - r.top };
+}
+
+function drawSegment(x0, y0, x1, y1, color, size, eraser) {
+  ctx.save();
+  ctx.globalCompositeOperation = eraser ? 'destination-out' : 'source-over';
+  ctx.strokeStyle = color;
+  ctx.lineWidth   = size;
+  ctx.lineCap     = 'round';
+  ctx.lineJoin    = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x0, y0);
+  ctx.lineTo(x1, y1);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function startDraw(e) {
+  e.preventDefault();
+  drawing = true;
+  lastPoint = getPos(e);
+  currentStrokePts = [lastPoint];
+}
+
+function moveDraw(e) {
+  if (!drawing) return;
+  e.preventDefault();
+  const pt = getPos(e);
+  const eraser = currentTool === 'eraser';
+  drawSegment(lastPoint.x, lastPoint.y, pt.x, pt.y, currentColor, brushSize, eraser);
+  currentStrokePts.push(pt);
+  lastPoint = pt;
+}
+
+function endDraw(e) {
+  if (!drawing) return;
+  drawing = false;
+  if (currentStrokePts.length > 1) {
+    sendStroke({
+      points: currentStrokePts,
+      color:  currentColor,
+      size:   brushSize,
+      eraser: currentTool === 'eraser',
+    });
+  }
+  currentStrokePts = [];
+  lastPoint = null;
+}
+
+canvas.addEventListener('mousedown',  startDraw);
+canvas.addEventListener('mousemove',  moveDraw);
+canvas.addEventListener('mouseup',    endDraw);
+canvas.addEventListener('mouseleave', endDraw);
+canvas.addEventListener('touchstart', startDraw, { passive: false });
+canvas.addEventListener('touchmove',  moveDraw,  { passive: false });
+canvas.addEventListener('touchend',   endDraw);
+
+function renderStroke(stroke) {
+  const pts = stroke.points;
+  if (!pts || pts.length < 2) return;
+  ctx.save();
+  ctx.globalCompositeOperation = stroke.eraser ? 'destination-out' : 'source-over';
+  ctx.strokeStyle = stroke.color;
+  ctx.lineWidth   = stroke.size;
+  ctx.lineCap     = 'round';
+  ctx.lineJoin    = 'round';
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+  ctx.stroke();
+  ctx.restore();
+  strokeCount++;
+  document.getElementById('stroke-count').textContent = strokeCount;
+}
+
+function clearBoard() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  strokeCount = 0;
+  document.getElementById('stroke-count').textContent = 0;
+  sendStroke({ type: 'clear' });
+}
+
+// ── WebSocket ─────────────────────────────────────────────────────────────────
+// Use same host/port as the page — nginx proxies /ws → gateway:8000
+const GATEWAY_WS = `ws://${location.host}/ws`;
+let ws = null;
+let reconnectDelay = 1000;
+
+function connect() {
+  setBadge('connecting');
+  ws = new WebSocket(GATEWAY_WS);
+
+  ws.onopen = () => {
+    setBadge('connected');
+    reconnectDelay = 1000;
+    addLog('WebSocket connected to gateway', 'info');
+  };
+
+  ws.onmessage = (evt) => {
+    try {
+      const msg = JSON.parse(evt.data);
+      if (msg.type === 'stroke' && msg.stroke) {
+        if (msg.stroke.type === 'clear') {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          strokeCount = 0;
+          document.getElementById('stroke-count').textContent = 0;
+        } else {
+          renderStroke(msg.stroke);
+        }
+        addLog(`committed stroke`, 'commit');
+      } else if (msg.type === 'snapshot') {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        strokeCount = 0;
+        (msg.strokes || []).forEach(s => {
+          if (s.type !== 'clear') renderStroke(s);
+        });
+        addLog(`snapshot: ${msg.strokes?.length ?? 0} strokes`, 'info');
+      } else if (msg.type === 'error') {
+        addLog(msg.msg, 'error');
+      }
+    } catch (e) {}
+  };
+
+  ws.onclose = () => {
+    setBadge('disconnected');
+    addLog('Disconnected — reconnecting...', 'error');
+    setTimeout(connect, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 1.5, 8000);
+  };
+
+  ws.onerror = () => ws.close();
+}
+
+function sendStroke(stroke) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'stroke', ...stroke }));
+  }
+}
+
+function setBadge(state) {
+  const badge = document.getElementById('ws-badge');
+  const dot   = document.getElementById('conn-dot');
+  const text  = document.getElementById('conn-text');
+  badge.className = `ws-badge ${state}`;
+  badge.textContent = state.toUpperCase();
+  dot.className = `dot ${state === 'connected' ? 'green' : state === 'connecting' ? 'amber' : 'red'}`;
+  text.textContent = state === 'connected' ? 'Connected' : state === 'connecting' ? 'Connecting…' : 'Disconnected';
+}
+
+// ── Cluster Status Polling ────────────────────────────────────────────────────
+const REPLICA_IDS = ['replica1', 'replica2', 'replica3'];
+
+async function pollReplica(id) {
+  try {
+    // nginx proxies /replica1/ → replica1:8001, /replica2/ → replica2:8002, etc.
+    const r = await fetch(`/${id}/status`, { signal: AbortSignal.timeout(1000) });
+    if (!r.ok) throw new Error();
+    const data = await r.json();
+    updateCard(id, data);
+  } catch {
+    updateCard(id, null);
+  }
+}
+
+function updateCard(id, data) {
+  const card = document.getElementById(`card-${id}`);
+  const pill = document.getElementById(`role-${id}`);
+  const termEl = document.getElementById(`term-${id}`);
+  const logEl  = document.getElementById(`log-${id}`);
+
+  if (!data) {
+    card.className = 'replica-card';
+    pill.className = 'role-pill unknown';
+    pill.textContent = 'DOWN';
+    termEl.textContent = 'term –';
+    logEl.textContent  = 'log –';
+    return;
+  }
+
+  const role = data.role || 'unknown';
+  card.className = `replica-card ${role}`;
+  pill.className = `role-pill ${role}`;
+  pill.textContent = role;
+  termEl.textContent = `term ${data.term}`;
+  logEl.textContent  = `log ${data.log_length} / ci ${data.commit_index}`;
+
+  if (role === 'leader') {
+    document.getElementById('leader-display').textContent = id;
+  }
+}
+
+function pollAll() {
+  REPLICA_IDS.forEach(id => pollReplica(id));
+}
+
+setInterval(pollAll, 1500);
+pollAll();
+
+// ── Activity Log ──────────────────────────────────────────────────────────────
+const logEl = document.getElementById('activity-log');
+function addLog(msg, type = '') {
+  const el = document.createElement('div');
+  el.className = `log-entry ${type}`;
+  const ts = new Date().toLocaleTimeString('en-GB', { hour12: false });
+  el.textContent = `${ts} ${msg}`;
+  logEl.appendChild(el);
+  if (logEl.children.length > 80) logEl.removeChild(logEl.firstChild);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// ── Start ─────────────────────────────────────────────────────────────────────
+connect();
+</script>
+</body>
+</html>
