@@ -168,3 +168,13 @@ miniraft/
 | Canvas blank after restart | Refresh browser — snapshot is sent on WS connect |
 | Port already in use | `lsof -ti:8000,8001,8002,8003 \| xargs kill` |
 | Replica stuck as follower | Restart it: `docker compose restart replica1` |
+
+
+## Contributors
+
+This project was implemented as part of the course Cloud Computing by Group 6- Section D.
+
+The team members are:
+- @[Neha Nair](https://github.com/nehanpnair)
+- @[Niharika Paul](https://github.com/Niharika-Paul)
+- @[Niharika Saha](https://github.com/niharika-saha)
